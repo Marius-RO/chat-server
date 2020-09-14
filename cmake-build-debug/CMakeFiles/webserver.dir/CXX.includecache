@@ -1,0 +1,18 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+D:/IT/Proiecte/C ~ C++/chat-server/main.cpp
+iostream
+-
+WS2tcpip.h
+-
+string
+-
+sstream
+-
+
