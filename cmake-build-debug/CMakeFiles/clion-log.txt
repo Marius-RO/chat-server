@@ -1,4 +1,0 @@
-C:\Users\blw_m\AppData\Local\JetBrains\Toolbox\apps\CLion\ch-0\202.6948.80\bin\cmake\win\bin\cmake.exe -DCMAKE_BUILD_TYPE=Debug -G "CodeBlocks - NMake Makefiles" "D:\IT\Proiecte\C ~ C++\chat-server"
--- Configuring done
--- Generating done
--- Build files have been written to: D:/IT/Proiecte/C ~ C++/chat-server/cmake-build-debug
