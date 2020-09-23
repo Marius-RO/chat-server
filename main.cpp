@@ -1,43 +1,82 @@
+/*  More details at
+ * https://docs.microsoft.com/en-us/windows/win32/winsock/initializing-winsock
+ * */
+
 #include <iostream>
 #include <WS2tcpip.h>
 #include <string>
 #include <sstream>
+#include <chrono>
+#include <thread>
 
 #pragma comment (lib, "ws2_32.lib")
 
+#define SERVER_PORT "54000"
+#define NEWLINE "\r\n"
+
 using namespace std;
 
-void main()
-{
-    // Initialze winsock
-    WSADATA wsData;
-    WORD ver = MAKEWORD(2, 2);
+int main(){
 
-    int wsOk = WSAStartup(ver, &wsData);
-    if (wsOk != 0)
-    {
-        cerr << "Can't Initialize winsock! Quitting" << endl;
-        return;
+    WSADATA wsaData;
+
+    // Initialize Winsock
+    int iResult = WSAStartup(MAKEWORD(2,2), &wsaData);
+    if (iResult != 0) {
+        cerr << "WSAStartup failed: " << iResult << NEWLINE;
+        return 1;
     }
 
-    // Create a socket
-    SOCKET listening = socket(AF_INET, SOCK_STREAM, 0);
-    if (listening == INVALID_SOCKET)
-    {
-        cerr << "Can't create a socket! Quitting" << endl;
-        return;
+    // server part
+    struct addrinfo *result = nullptr, hints{}; // hints{} means an empty initialization for hints
+
+    ZeroMemory(&hints, sizeof (hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    hints.ai_flags = AI_PASSIVE;
+
+    // Resolve the local address and port to be used by the server
+    iResult = getaddrinfo(nullptr, SERVER_PORT, &hints, &result);
+    if (iResult != 0) {
+        cerr << "getaddrinfo failed: " << iResult << NEWLINE;
+        WSACleanup();
+        return 1;
     }
 
-    // Bind the ip address and port to a socket
-    sockaddr_in hint;
-    hint.sin_family = AF_INET;
-    hint.sin_port = htons(54000);
-    hint.sin_addr.S_un.S_addr = INADDR_ANY; // Could also use inet_pton ....
+    // Create a SOCKET for the server to listen for client connections
+    SOCKET listeningSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+    if (listeningSocket == INVALID_SOCKET){
+        cerr << "Error when creating the socket" << NEWLINE <<  WSAGetLastError();
+        WSACleanup();
+        return 1;
+    }
 
-    bind(listening, (sockaddr*)&hint, sizeof(hint));
+
+    // Setup the TCP listening socket (bind the ip address and port to a socket)
+    iResult = bind(listeningSocket, result->ai_addr, (int)result->ai_addrlen);
+    if (iResult == SOCKET_ERROR) {
+        cerr << "bind failed with error: " << WSAGetLastError() << NEWLINE;
+        freeaddrinfo(result);
+        closesocket(listeningSocket);
+        WSACleanup();
+        return 1;
+    }
+
+    /* Once the bind function is called, the address information returned by the getaddrinfo function is no longer needed.
+     * The freeaddrinfo function is called to free the memory allocated by the getaddrinfo function for this address
+     * information. */
+    freeaddrinfo(result);
+
 
     // Tell Winsock the socket is for listening
-    listen(listening, SOMAXCONN);
+    if ( listen( listeningSocket, SOMAXCONN ) == SOCKET_ERROR ) {
+        cerr << "Listen failed with error: " << WSAGetLastError() << NEWLINE;
+        closesocket(listeningSocket);
+        WSACleanup();
+        return 1;
+    }
+
 
     // Create the master file descriptor set and zero it
     fd_set master;
@@ -46,13 +85,14 @@ void main()
     // Add our first socket that we're interested in interacting with; the listening socket!
     // It's important that this socket is added for our server or else we won't 'hear' incoming
     // connections
-    FD_SET(listening, &master);
+    FD_SET(listeningSocket, &master);
 
-    // this will be changed by the \quit command (see below, bonus not in video!)
+    cout << "---------------------------------------" << NEWLINE;
+    cout << "Server is running. Waiting connections." << NEWLINE;
+    cout << "---------------------------------------" << NEWLINE;
+
     bool running = true;
-
-    while (running)
-    {
+    while (running){
         // Make a copy of the master file descriptor set, this is SUPER important because
         // the call to select() is _DESTRUCTIVE_. The copy only contains the sockets that
         // are accepting inbound connection requests OR messages.
@@ -71,47 +111,57 @@ void main()
         int socketCount = select(0, &copy, nullptr, nullptr, nullptr);
 
         // Loop through all the current connections / potential connect
-        for (int i = 0; i < socketCount; i++)
-        {
-            // Makes things easy for us doing this assignment
-            SOCKET sock = copy.fd_array[i];
+        for (int i = 0; i < socketCount; i++){
 
-            // Is it an inbound communication?
-            if (sock == listening)
-            {
+            // Makes things easy for us doing this assignment
+            SOCKET currentInputSocket = copy.fd_array[i];
+
+            // Is it an inbound communication ( a new client is connected to server )
+            if (currentInputSocket == listeningSocket){
+
                 // Accept a new connection
-                SOCKET client = accept(listening, nullptr, nullptr);
+                SOCKET clientSocket = accept(listeningSocket, nullptr, nullptr);
+                if (clientSocket == INVALID_SOCKET) {
+                    cerr << "accept failed: " << WSAGetLastError() << NEWLINE;
+                    closesocket(listeningSocket);
+                    WSACleanup();
+                    return 1;
+                }
 
                 // Add the new connection to the list of connected clients
-                FD_SET(client, &master);
+                FD_SET(clientSocket, &master);
 
                 // Send a welcome message to the connected client
-                string welcomeMsg = "Welcome to the Awesome Chat Server!\r\n";
-                cout << "Client connected!\r\n";
-                send(client, welcomeMsg.c_str(), welcomeMsg.size() + 1, 0);
+                string welcomeMessage = "---------------------------------------------------";
+                welcomeMessage += NEWLINE;
+                welcomeMessage += "Welcome to the Chat Server! Your socket is #" + to_string(clientSocket) + NEWLINE;
+                welcomeMessage += "---------------------------------------------------";
+                welcomeMessage += NEWLINE;
+                send(clientSocket, welcomeMessage.c_str(), (int)welcomeMessage.size() + 1, 0);
+
+                // show that a client is connected in server console
+                cout << "Client connected on socket # " << clientSocket << NEWLINE;
+
             }
-            else // It's an inbound message
-            {
-                char buf[4096];
-                ZeroMemory(buf, 4096);
+            else{ // It's an inbound message ( a client sent a message )
+
+                #define BUF_LEN 4096
+                char buf[BUF_LEN];
+                ZeroMemory(buf, BUF_LEN);
 
                 // Receive message
-                int bytesIn = recv(sock, buf, 4096, 0);
-                if (bytesIn <= 0)
-                {
+                int bytesIn = recv(currentInputSocket, buf, BUF_LEN, 0);
+                if (bytesIn <= 0){
                     // Drop the client
-                    closesocket(sock);
-                    FD_CLR(sock, &master);
+                    closesocket(currentInputSocket);
+                    FD_CLR(currentInputSocket, &master);
                 }
-                else
-                {
+                else{
                     // Check to see if it's a command. \quit kills the server
-                    if (buf[0] == '\\')
-                    {
+                    if (buf[0] == '\\'){
                         // Is the command quit?
                         string cmd = string(buf, bytesIn);
-                        if (cmd == "\\quit")
-                        {
+                        if (cmd == "\\quit\r\n"){
                             running = false;
                             break;
                         }
@@ -120,18 +170,16 @@ void main()
                         continue;
                     }
 
-                    // Send message to other clients, and definiately NOT the listening socket
-
-                    for (int i = 0; i < master.fd_count; i++)
-                    {
-                        SOCKET outSock = master.fd_array[i];
-                        if (outSock != listening && outSock != sock)
-                        {
+                    // broadcast message to all connected clients
+                    for (int j = 0; j < master.fd_count; j++){
+                        SOCKET outputSocket = master.fd_array[j];
+                        // don`t send message to server and to himself
+                        if (outputSocket != listeningSocket && outputSocket != currentInputSocket){
                             ostringstream ss;
-                            ss << "SOCKET #" << sock << ": " << buf << "\r\n";
+                            ss << "SOCKET #" << outputSocket << ": " << buf << NEWLINE;
                             string strOut = ss.str();
 
-                            send(outSock, strOut.c_str(), strOut.size() + 1, 0);
+                            send(outputSocket, strOut.c_str(), (int)strOut.size() + 1, 0);
                         }
                     }
                 }
@@ -139,29 +187,38 @@ void main()
         }
     }
 
+    //Shut down the server and close all active connections
+
     // Remove the listening socket from the master file descriptor set and close it
     // to prevent anyone else trying to connect.
-    FD_CLR(listening, &master);
-    closesocket(listening);
+    FD_CLR(listeningSocket, &master);
+    closesocket(listeningSocket);
 
-    // Message to let users know what's happening.
-    string msg = "Server is shutting down. Goodbye\r\n";
+    // Message to let clients know what's happening.
+    string message = "--------------------------------";
+    message += NEWLINE;
+    message += "Server is shutting down. Goodbye";
+    message += NEWLINE;
+    message += "--------------------------------";
 
-    while (master.fd_count > 0)
-    {
+    while (master.fd_count > 0){
         // Get the socket number
-        SOCKET sock = master.fd_array[0];
+        SOCKET currentSocket = master.fd_array[0];
 
         // Send the goodbye message
-        send(sock, msg.c_str(), msg.size() + 1, 0);
+        send(currentSocket, message.c_str(), (int)message.size() + 1, 0);
+        // give 4 second for client to see the message
+        this_thread::sleep_for(chrono::milliseconds(4000));
 
         // Remove it from the master file list and close the socket
-        FD_CLR(sock, &master);
-        closesocket(sock);
+        FD_CLR(currentSocket, &master);
+        closesocket(currentSocket);
     }
 
     // Cleanup winsock
     WSACleanup();
 
     system("pause");
+
+    return 0;
 }
