@@ -13,4 +13,11 @@ The starting code added in second commit **https://github.com/Marius-RO/chat-ser
 ### Project Info
 
 This project simulates a chat server where multiple clients can be connected to it and broadcast messages. In this scope and for simplicity PuTTY can be used as in below images.
+In my example server runs on the localhost on port 54000.
+
+<p align="center">
+  <img src="https://github.com/Marius-RO/chat-server/blob/master/img/putty-config.JPG" width="450" title="putty-config-img">
+  <br>
+  <img src="https://github.com/Marius-RO/chat-server/blob/master/img/putty-chat.gif" width="750" title="putty-chat-gif">
+</p>
 
